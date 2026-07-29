@@ -1,28 +1,12 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:get_storage/get_storage.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-
-// URL y ANON KEY de tu Supabase
-const String supabaseUrl = 'https://udgjuklahubxyzxshywb.supabase.co';
-const String supabaseAnonKey =
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkZ2p1a2xhaHVieHl6eHNoeXdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUzMjQxNTgsImV4cCI6MjEwMDkwMDE1OH0.cFD6Dp4jZCSIjdiyqjOI3tPz0SY_JAa71hHuYMdmYJQ';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // Inicialización de Supabase
-  await Supabase.initialize(
-    url: supabaseUrl,
-    anonKey: supabaseAnonKey,
-  );
-  
   await GetStorage.init();
   runApp(const AriGastosApp());
 }
-
-// Cliente global de Supabase
-final supabase = Supabase.instance.client;
 
 class AriGastosApp extends StatelessWidget {
   const AriGastosApp({super.key});
@@ -69,10 +53,10 @@ class MedioPago {
       };
 
   factory MedioPago.fromMap(Map<String, dynamic> map) => MedioPago(
-        id: map['id'].toString(),
-        nombre: map['nombre'] ?? '',
-        entidad: map['entidad'] ?? '',
-        tipo: map['tipo'] ?? 'Efectivo',
+        id: map['id'],
+        nombre: map['nombre'],
+        entidad: map['entidad'],
+        tipo: map['tipo'],
         ultimos4: map['ultimos4'] ?? '',
       );
 }
@@ -111,12 +95,12 @@ class Gasto {
       };
 
   factory Gasto.fromMap(Map<String, dynamic> map) => Gasto(
-        id: map['id'].toString(),
-        titulo: map['titulo'] ?? '',
-        monto: (map['monto'] as num).toDouble(),
-        categoria: map['categoria'] ?? 'Otros',
+        id: map['id'],
+        titulo: map['titulo'],
+        monto: map['monto'],
+        categoria: map['categoria'],
         subcategoria: map['subcategoria'] ?? '',
-        medioPagoId: map['medioPagoId'] ?? map['medio_pago_id'] ?? 'efectivo_default',
+        medioPagoId: map['medioPagoId'] ?? 'efectivo_default',
         fecha: DateTime.parse(map['fecha']),
         ambito: map['ambito'] ?? 'Personal',
       );
@@ -135,7 +119,6 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _tabIndex = 0;
-  bool _cargando = true;
   List<Gasto> _gastos = [];
   List<String> _categorias = [
     'Comida', 'Transporte', 'Servicios', 'Educación', 'Inmuebles', 'Vehículos', 'Ocio', 'Otros'
@@ -187,47 +170,41 @@ class _HomeScreenState extends State<HomeScreen> {
     _cargarDatos();
   }
 
-  Future<void> _cargarDatos() async {
-    setState(() => _cargando = true);
+  void _cargarDatos() {
+    final List<dynamic>? storedGastos = _box.read<List<dynamic>>('arigastos_list');
+    if (storedGastos != null) {
+      _gastos = storedGastos.map((item) => Gasto.fromMap(Map<String, dynamic>.from(item))).toList();
+    }
 
-    // 1. Cargar almacenamiento local de respaldo
     final List<dynamic>? storedCats = _box.read<List<dynamic>>('arigastos_cats');
-    if (storedCats != null) _categorias = storedCats.cast<String>();
+    if (storedCats != null) {
+      _categorias = storedCats.cast<String>();
+    }
 
     final List<dynamic>? storedSubCats = _box.read<List<dynamic>>('arigastos_subcats');
-    if (storedSubCats != null) _subcategoriasFrecuentes = storedSubCats.cast<String>();
+    if (storedSubCats != null) {
+      _subcategoriasFrecuentes = storedSubCats.cast<String>();
+    }
+
+    final List<dynamic>? storedMedios = _box.read<List<dynamic>>('arigastos_medios');
+    if (storedMedios != null) {
+      _mediosPago = storedMedios.map((item) => MedioPago.fromMap(Map<String, dynamic>.from(item))).toList();
+    }
 
     final List<dynamic>? storedConceptos = _box.read<List<dynamic>>('arigastos_conceptos');
-    if (storedConceptos != null) _conceptosFrecuentes = storedConceptos.cast<String>();
-
-    try {
-      // 2. Traer Medios de Pago desde Supabase
-      final responseMedios = await supabase.from('medios_pago').select();
-      if (responseMedios.isNotEmpty) {
-        _mediosPago = responseMedios.map((m) => MedioPago.fromMap(m)).toList();
-      }
-
-      // 3. Traer Gastos desde Supabase
-      final responseGastos = await supabase.from('gastos').select().order('fecha', ascending: false);
-      _gastos = responseGastos.map((g) => Gasto.fromMap(g)).toList();
-      _guardarGastosLocal();
-    } catch (e) {
-      // Fallback a almacenamiento local si falla la red
-      final List<dynamic>? storedGastos = _box.read<List<dynamic>>('arigastos_list');
-      if (storedGastos != null) {
-        _gastos = storedGastos.map((item) => Gasto.fromMap(Map<String, dynamic>.from(item))).toList();
-      }
-      final List<dynamic>? storedMedios = _box.read<List<dynamic>>('arigastos_medios');
-      if (storedMedios != null) {
-        _mediosPago = storedMedios.map((item) => MedioPago.fromMap(Map<String, dynamic>.from(item))).toList();
-      }
-    } finally {
-      if (mounted) setState(() => _cargando = false);
+    if (storedConceptos != null) {
+      _conceptosFrecuentes = storedConceptos.cast<String>();
     }
+
+    setState(() {});
   }
 
-  void _guardarGastosLocal() {
+  void _guardarGastos() {
     _box.write('arigastos_list', _gastos.map((g) => g.toMap()).toList());
+  }
+
+  void _guardarMediosPago() {
+    _box.write('arigastos_medios', _mediosPago.map((m) => m.toMap()).toList());
   }
 
   void _guardarConceptos() {
@@ -251,6 +228,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _aprenderSubcategoria(String subcat) {
     final limpio = subcat.trim();
     if (limpio.isNotEmpty) {
+      // Buscar si ya existe ignorando mayúsculas/minúsculas para no duplicar
       final existe = _subcategoriasFrecuentes.any((s) => s.toLowerCase() == limpio.toLowerCase());
       if (!existe) {
         setState(() {
@@ -261,7 +239,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _agregarOActualizarGasto({
+  void _agregarOActualizarGasto({
     String? id,
     required String titulo,
     required double monto,
@@ -270,55 +248,48 @@ class _HomeScreenState extends State<HomeScreen> {
     required String medioPagoId,
     required DateTime fecha,
     required String ambito,
-  }) async {
+  }) {
     _aprenderConcepto(titulo);
     _aprenderSubcategoria(subcategoria);
-
-    final String gastoId = id ?? DateTime.now().millisecondsSinceEpoch.toString();
-
-    final gastoData = {
-      'id': gastoId,
-      'titulo': titulo,
-      'monto': monto,
-      'categoria': categoria,
-      'subcategoria': subcategoria,
-      'medioPagoId': medioPagoId,
-      'fecha': fecha.toIso8601String(),
-      'ambito': ambito,
-    };
 
     setState(() {
       if (id != null) {
         final index = _gastos.indexWhere((g) => g.id == id);
         if (index != -1) {
-          _gastos[index] = Gasto.fromMap(gastoData);
+          _gastos[index] = Gasto(
+            id: id,
+            titulo: titulo,
+            monto: monto,
+            categoria: categoria,
+            subcategoria: subcategoria,
+            medioPagoId: medioPagoId,
+            fecha: fecha,
+            ambito: ambito,
+          );
         }
       } else {
-        _gastos.add(Gasto.fromMap(gastoData));
+        final nuevoGasto = Gasto(
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
+          titulo: titulo,
+          monto: monto,
+          categoria: categoria,
+          subcategoria: subcategoria,
+          medioPagoId: medioPagoId,
+          fecha: fecha,
+          ambito: ambito,
+        );
+        _gastos.add(nuevoGasto);
       }
       _gastos.sort((a, b) => b.fecha.compareTo(a.fecha));
     });
-    _guardarGastosLocal();
-
-    // Guardar en Supabase en segundo plano
-    try {
-      await supabase.from('gastos').upsert(gastoData);
-    } catch (e) {
-      debugPrint('Error guardando en Supabase: $e');
-    }
+    _guardarGastos();
   }
 
-  Future<void> _eliminarGasto(String id) async {
+  void _eliminarGasto(String id) {
     setState(() {
       _gastos.removeWhere((gasto) => gasto.id == id);
     });
-    _guardarGastosLocal();
-
-    try {
-      await supabase.from('gastos').delete().eq('id', id);
-    } catch (e) {
-      debugPrint('Error eliminando de Supabase: $e');
-    }
+    _guardarGastos();
   }
 
   // ALGORITMO LOCAL DE ANÁLISIS DE VOZ
@@ -503,16 +474,11 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () async {
+            onPressed: () {
               setState(() {
                 _gastos.clear();
               });
-              _guardarGastosLocal();
-              try {
-                await supabase.from('gastos').delete().neq('id', '0');
-              } catch (e) {
-                debugPrint('Error en borrado masivo Supabase: $e');
-              }
+              _guardarGastos();
               Navigator.of(ctx).pop();
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Se han eliminado todos los gastos correctamente.')),
@@ -594,7 +560,7 @@ class _HomeScreenState extends State<HomeScreen> {
             TextButton(onPressed: () => Navigator.of(ctx).pop(null), child: const Text('Cancelar')),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
-              onPressed: () async {
+              onPressed: () {
                 if (nombreController.text.isNotEmpty && entidadController.text.isNotEmpty) {
                   final nuevoMedio = MedioPago(
                     id: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -604,13 +570,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ultimos4: ultimos4Controller.text,
                   );
                   setState(() => _mediosPago.add(nuevoMedio));
-                  
-                  try {
-                    await supabase.from('medios_pago').insert(nuevoMedio.toMap());
-                  } catch (e) {
-                    debugPrint('Error guardando medio en Supabase: $e');
-                  }
-                  
+                  _guardarMediosPago();
                   Navigator.of(ctx).pop(nuevoMedio);
                 }
               },
@@ -808,6 +768,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                     const SizedBox(width: 8),
+                    // AUTOCOMPLETE INTELIGENTE PARA SUBRUBRO / CENTRO COSTOS
                     Expanded(
                       child: Autocomplete<String>(
                         initialValue: TextEditingValue(text: subCatController.text),
@@ -930,7 +891,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('AriGastos ☁️'),
+        title: const Text('AriGastos'),
         centerTitle: true,
         backgroundColor: Colors.teal,
         foregroundColor: Colors.white,
@@ -944,21 +905,9 @@ class _HomeScreenState extends State<HomeScreen> {
             onSelected: (value) {
               if (value == 'borrar_todo') {
                 _confirmarYBorrarTodosLosGastos();
-              } else if (value == 'recargar') {
-                _cargarDatos();
               }
             },
             itemBuilder: (BuildContext context) => [
-              const PopupMenuItem<String>(
-                value: 'recargar',
-                child: Row(
-                  children: [
-                    Icon(Icons.refresh, color: Colors.teal),
-                    SizedBox(width: 8),
-                    Text('Sincronizar Nube'),
-                  ],
-                ),
-              ),
               const PopupMenuItem<String>(
                 value: 'borrar_todo',
                 child: Row(
@@ -973,35 +922,33 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      body: _cargando
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
+      body: Column(
+        children: [
+          Container(
+            color: Colors.teal.shade100,
+            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 16),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Container(
-                  color: Colors.teal.shade100,
-                  padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 16),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Text('Periodo: ', style: TextStyle(fontWeight: FontWeight.bold)),
-                      const SizedBox(width: 8),
-                      SegmentedButton<FiltroFecha>(
-                        segments: const [
-                          ButtonSegment(value: FiltroFecha.esteMes, label: Text('Este Mes')),
-                          ButtonSegment(value: FiltroFecha.mesAnterior, label: Text('Mes Anterior')),
-                          ButtonSegment(value: FiltroFecha.todos, label: Text('Todos')),
-                        ],
-                        selected: {_filtroActual},
-                        onSelectionChanged: (newSelection) => setState(() => _filtroActual = newSelection.first),
-                      ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: _tabIndex == 0 ? _buildVistaGastos() : _buildVistaReportes(),
+                const Text('Periodo: ', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(width: 8),
+                SegmentedButton<FiltroFecha>(
+                  segments: const [
+                    ButtonSegment(value: FiltroFecha.esteMes, label: Text('Este Mes')),
+                    ButtonSegment(value: FiltroFecha.mesAnterior, label: Text('Mes Anterior')),
+                    ButtonSegment(value: FiltroFecha.todos, label: Text('Todos')),
+                  ],
+                  selected: {_filtroActual},
+                  onSelectionChanged: (newSelection) => setState(() => _filtroActual = newSelection.first),
                 ),
               ],
             ),
+          ),
+          Expanded(
+            child: _tabIndex == 0 ? _buildVistaGastos() : _buildVistaReportes(),
+          ),
+        ],
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tabIndex,
         onDestinationSelected: (index) => setState(() => _tabIndex = index),
