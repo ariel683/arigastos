@@ -1,0 +1,500 @@
+import 'package:flutter/material.dart';
+import 'package:get_storage/get_storage.dart';
+
+void main() async {
+  await GetStorage.init();
+  runApp(const AriGastosApp());
+}
+
+class AriGastosApp extends StatelessWidget {
+  const AriGastosApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'AriGastos',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.teal,
+          brightness: Brightness.light,
+        ),
+        useMaterial3: true,
+      ),
+      home: const HomeScreen(),
+    );
+  }
+}
+
+class Gasto {
+  final String id;
+  final String titulo;
+  final double monto;
+  final String categoria;
+  final DateTime fecha;
+
+  Gasto({
+    required this.id,
+    required this.titulo,
+    required this.monto,
+    required this.categoria,
+    required this.fecha,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'titulo': titulo,
+      'monto': monto,
+      'categoria': categoria,
+      'fecha': fecha.toIso8601String(),
+    };
+  }
+
+  factory Gasto.fromMap(Map<String, dynamic> map) {
+    return Gasto(
+      id: map['id'],
+      titulo: map['titulo'],
+      monto: map['monto'],
+      categoria: map['categoria'],
+      fecha: DateTime.parse(map['fecha']),
+    );
+  }
+}
+
+enum FiltroFecha { esteMes, mesAnterior, todos }
+
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  List<Gasto> _gastos = [];
+  List<String> _categorias = ['Comida', 'Transporte', 'Servicios', 'Ocio', 'Otros'];
+  FiltroFecha _filtroActual = FiltroFecha.esteMes;
+  final _box = GetStorage();
+
+  @override
+  void initState() {
+    super.initState();
+    _cargarDatos();
+  }
+
+  void _cargarDatos() {
+    final List<dynamic>? storedGastos = _box.read<List<dynamic>>('arigastos_list');
+    if (storedGastos != null) {
+      _gastos = storedGastos.map((item) => Gasto.fromMap(Map<String, dynamic>.from(item))).toList();
+    }
+
+    final List<dynamic>? storedCats = _box.read<List<dynamic>>('arigastos_cats');
+    if (storedCats != null) {
+      _categorias = storedCats.cast<String>();
+    }
+
+    setState(() {});
+  }
+
+  void _guardarGastos() {
+    final List<Map<String, dynamic>> jsonList = _gastos.map((g) => g.toMap()).toList();
+    _box.write('arigastos_list', jsonList);
+  }
+
+  void _guardarCategorias() {
+    _box.write('arigastos_cats', _categorias);
+  }
+
+  void _agregarGasto(String titulo, double monto, String categoria, DateTime fecha) {
+    final nuevoGasto = Gasto(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      titulo: titulo,
+      monto: monto,
+      categoria: categoria,
+      fecha: fecha,
+    );
+
+    setState(() {
+      _gastos.add(nuevoGasto);
+      // Ordenamos por fecha descendente (los más recientes primero)
+      _gastos.sort((a, b) => b.fecha.compareTo(a.fecha));
+    });
+    _guardarGastos();
+  }
+
+  void _eliminarGasto(String id) {
+    setState(() {
+      _gastos.removeWhere((gasto) => gasto.id == id);
+    });
+    _guardarGastos();
+  }
+
+  void _agregarNuevaCategoria(String nuevaCat) {
+    if (nuevaCat.trim().isEmpty) return;
+    final catLimpia = nuevaCat.trim();
+    if (!_categorias.contains(catLimpia)) {
+      setState(() {
+        _categorias.add(catLimpia);
+      });
+      _guardarCategorias();
+    }
+  }
+
+  // Filtrado de gastos según el periodo elegido
+  List<Gasto> get _gastosFiltrados {
+    final ahora = DateTime.now();
+    return _gastos.where((gasto) {
+      if (_filtroActual == FiltroFecha.esteMes) {
+        return gasto.fecha.year == ahora.year && gasto.fecha.month == ahora.month;
+      } else if (_filtroActual == FiltroFecha.mesAnterior) {
+        final mesPasado = DateTime(ahora.year, ahora.month - 1);
+        return gasto.fecha.year == mesPasado.year && gasto.fecha.month == mesPasado.month;
+      }
+      return true; // FiltroFecha.todos
+    }).toList();
+  }
+
+  double get _totalGastosFiltrados =>
+      _gastosFiltrados.fold(0, (sum, item) => sum + item.monto);
+
+  Map<String, double> get _gastosPorCategoria {
+    final Map<String, double> resumen = {};
+    for (var cat in _categorias) {
+      resumen[cat] = 0.0;
+    }
+    for (var gasto in _gastosFiltrados) {
+      resumen[gasto.categoria] = (resumen[gasto.categoria] ?? 0.0) + gasto.monto;
+    }
+    return resumen;
+  }
+
+  void _mostrarFormularioGasto() {
+    final tituloController = TextEditingController();
+    final montoController = TextEditingController();
+    String categoriaSeleccionada = _categorias.first;
+    DateTime fechaSeleccionada = DateTime.now();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) => Padding(
+          padding: EdgeInsets.only(
+            top: 16,
+            left: 16,
+            right: 16,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Nuevo Gasto',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: tituloController,
+                decoration: const InputDecoration(
+                  labelText: 'Descripción / Título',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: montoController,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Monto (\$)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: categoriaSeleccionada,
+                decoration: const InputDecoration(
+                  labelText: 'Rubro / Categoría',
+                  border: OutlineInputBorder(),
+                ),
+                items: _categorias
+                    .map((cat) => DropdownMenuItem(value: cat, child: Text(cat)))
+                    .toList(),
+                onChanged: (val) {
+                  if (val != null) setModalState(() => categoriaSeleccionada = val);
+                },
+              ),
+              const SizedBox(height: 12),
+              // Selector de Fecha
+              InkWell(
+                onTap: () async {
+                  final pickedDate = await showDatePicker(
+                    context: context,
+                    initialDate: fechaSeleccionada,
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime(2100),
+                  );
+                  if (pickedDate != null) {
+                    setModalState(() => fechaSeleccionada = pickedDate);
+                  }
+                },
+                child: InputDecorator(
+                  decoration: const InputDecoration(
+                    labelText: 'Fecha del Gasto',
+                    border: OutlineInputBorder(),
+                    suffixIcon: Icon(Icons.calendar_today),
+                  ),
+                  child: Text(_formatearFecha(fechaSeleccionada)),
+                ),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
+                  onPressed: () {
+                    final titulo = tituloController.text;
+                    final monto = double.tryParse(montoController.text) ?? 0.0;
+                    if (titulo.isNotEmpty && monto > 0) {
+                      _agregarGasto(titulo, monto, categoriaSeleccionada, fechaSeleccionada);
+                      Navigator.of(ctx).pop();
+                    }
+                  },
+                  child: const Text('Guardar Gasto', style: TextStyle(color: Colors.white, fontSize: 16)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _mostrarFormularioNuevaCategoria() {
+    final catController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Crear Nuevo Rubro'),
+        content: TextField(
+          controller: catController,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(
+            labelText: 'Nombre de la Categoría',
+            hintText: 'Ej: Mascotas, Viajes...',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
+            onPressed: () {
+              if (catController.text.isNotEmpty) {
+                _agregarNuevaCategoria(catController.text);
+                Navigator.of(ctx).pop();
+              }
+            },
+            child: const Text('Agregar', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final listaActual = _gastosFiltrados;
+    final resumenCat = _gastosPorCategoria;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('AriGastos'),
+        centerTitle: true,
+        backgroundColor: Colors.teal,
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.category_outlined),
+            tooltip: 'Crear Rubro',
+            onPressed: _mostrarFormularioNuevaCategoria,
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          // Selector de Periodo (Filtro Superior)
+          Container(
+            color: Colors.teal.shade100,
+            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 16),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Text('Periodo: ', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(width: 8),
+                SegmentedButton<FiltroFecha>(
+                  segments: const [
+                    ButtonSegment(value: FiltroFecha.esteMes, label: Text('Este Mes')),
+                    ButtonSegment(value: FiltroFecha.mesAnterior, label: Text('Mes Anterior')),
+                    ButtonSegment(value: FiltroFecha.todos, label: Text('Todos')),
+                  ],
+                  selected: {_filtroActual},
+                  onSelectionChanged: (newSelection) {
+                    setState(() {
+                      _filtroActual = newSelection.first;
+                    });
+                  },
+                  style: ButtonStyle(
+                    visualDensity: VisualDensity.compact,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Banner de Total Filtrado
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
+            color: Colors.teal.shade50,
+            child: Column(
+              children: [
+                Text(
+                  _getTituloPeriodo().toUpperCase(),
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '\$${_totalGastosFiltrados.toStringAsFixed(2)}',
+                  style: TextStyle(
+                    fontSize: 32,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.teal.shade900,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Desglose por Rubros
+          if (listaActual.isNotEmpty)
+            Container(
+              height: 42,
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                children: _categorias.map((cat) {
+                  final totalRubro = resumenCat[cat] ?? 0.0;
+                  if (totalRubro == 0) return const SizedBox.shrink();
+                  return Container(
+                    margin: const EdgeInsets.only(right: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.teal.shade100,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      children: [
+                        Text('$cat: ', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                        Text('\$${totalRubro.toStringAsFixed(2)}', style: TextStyle(color: Colors.teal.shade900, fontSize: 12)),
+                      ],
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+
+          const Divider(height: 1),
+
+          // Lista de Gastos Filtrados
+          Expanded(
+            child: listaActual.isEmpty
+                ? Center(
+                    child: Text(
+                      'No hay gastos registrados en ${_getTituloPeriodo().toLowerCase()}.',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.grey),
+                    ),
+                  )
+                : ListView.builder(
+                    itemCount: listaActual.length,
+                    itemBuilder: (ctx, index) {
+                      final gasto = listaActual[index];
+                      return Dismissible(
+                        key: ValueKey(gasto.id),
+                        background: Container(
+                          color: Colors.red.shade400,
+                          alignment: Alignment.centerRight,
+                          padding: const EdgeInsets.only(right: 20),
+                          child: const Icon(Icons.delete, color: Colors.white),
+                        ),
+                        direction: DismissDirection.endToStart,
+                        onDismissed: (_) => _eliminarGasto(gasto.id),
+                        child: ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: Colors.teal.shade100,
+                            child: Icon(
+                              _getIconoCategoria(gasto.categoria),
+                              color: Colors.teal.shade800,
+                            ),
+                          ),
+                          title: Text(gasto.titulo, style: const TextStyle(fontWeight: FontWeight.bold)),
+                          subtitle: Text('${gasto.categoria} • ${_formatearFecha(gasto.fecha)}'),
+                          trailing: Text(
+                            '\$${gasto.monto.toStringAsFixed(2)}',
+                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _mostrarFormularioGasto,
+        backgroundColor: Colors.teal,
+        icon: const Icon(Icons.add, color: Colors.white),
+        label: const Text('Gasto', style: TextStyle(color: Colors.white)),
+      ),
+    );
+  }
+
+  String _getTituloPeriodo() {
+    switch (_filtroActual) {
+      case FiltroFecha.esteMes:
+        return 'Gasto de Este Mes';
+      case FiltroFecha.mesAnterior:
+        return 'Gasto del Mes Anterior';
+      case FiltroFecha.todos:
+        return 'Gasto Histórico Total';
+    }
+  }
+
+  String _formatearFecha(DateTime date) {
+    return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
+  }
+
+  IconData _getIconoCategoria(String cat) {
+    switch (cat.toLowerCase()) {
+      case 'comida':
+        return Icons.restaurant;
+      case 'transporte':
+        return Icons.directions_bus;
+      case 'servicios':
+        return Icons.receipt;
+      case 'ocio':
+        return Icons.movie;
+      default:
+        return Icons.label_outline;
+    }
+  }
+}
